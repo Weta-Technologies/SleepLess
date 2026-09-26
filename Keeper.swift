@@ -351,7 +351,7 @@ struct LidDark: Codable, Equatable {
         let lidClosed = Power.lidClosed
         let darkLid = lidClosed && lidActive && !Display.hasExternal
         // MagSafe light off while the lid is shut in lid-closed mode, macOS's normal colour again when it opens.
-        // Only on the change, so it never fights macOS (or JuiceLeft, which drives the light while the lid is open).
+        // Only on the change, so it never fights macOS (or another app that drives the light while the lid is open).
         let wantLightOff = lightOffWithLid && lidClosed && lidActive
         if helperReady, wantLightOff != lightOff {
             LidHelper.light(!wantLightOff)
