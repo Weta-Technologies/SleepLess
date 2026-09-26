@@ -55,8 +55,9 @@ import SwiftUI
         // and taking the menu away inside it would drop that action.
         menu = StatusMenu(keeper: keeper, openSettings: { [weak self] in self?.open() },
                           closed: { [weak self] in DispatchQueue.main.async { MainActor.assumeIsolated { self?.item.menu = nil } } })
-        // The glyph, with a small dot at its corner while an update waits in the panel.
-        keeper.icon.$image.combineLatest(Updater.shared.$state.map { $0 != .idle && Updater.shared.available != nil }.removeDuplicates())
+        // The glyph, with a small dot at its corner while an update waits in the panel. $state fires before the new
+        // state is stored, so `available` is read a turn later, once it is.
+        keeper.icon.$image.combineLatest(Updater.shared.$state.receive(on: DispatchQueue.main).map { _ in Updater.shared.available != nil }.removeDuplicates())
             .sink { image, update in MainActor.assumeIsolated { button.image = update ? Updater.badged(image) : image } }
             .store(in: &sinks)
         keeper.$s.combineLatest(keeper.$reasons).map { $0.screenOn || $0.lidOn || !$1.isEmpty }.removeDuplicates()
