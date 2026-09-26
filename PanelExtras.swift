@@ -64,7 +64,7 @@ struct AppRows: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var animation: Animation? { reduceMotion ? nil : panelEase }
-    private var running: Set<String> { Set(NSWorkspace.shared.runningApplications.compactMap(\.bundleIdentifier)) }
+    private var running: Set<String> { keeper.hw.runningApps() }
 
     private func add(_ app: AppRef) {
         guard !keeper.s.apps.contains(where: { $0.id == app.id }) else { return }

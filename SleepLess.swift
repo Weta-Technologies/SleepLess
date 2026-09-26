@@ -13,6 +13,7 @@ import IOKit.pwr_mgt
         if CommandLine.arguments.contains("--selftest") { selfTest() }
         if CommandLine.arguments.contains("--selftest-hardware") { hardwareSelfTest() }
         if let i = CommandLine.arguments.firstIndex(of: "--shots"), i + 1 < CommandLine.arguments.count { Shots.run(dir: CommandLine.arguments[i + 1]) }
+        if let i = CommandLine.arguments.firstIndex(of: "--e2e"), i + 1 < CommandLine.arguments.count { E2E.prepare(dir: CommandLine.arguments[i + 1]) }
         // --appearance dark|light: the live app (menu and panel) in one appearance, for screenshots from a copy.
         if let i = CommandLine.arguments.firstIndex(of: "--appearance"), i + 1 < CommandLine.arguments.count {
             NSApp.appearance = NSAppearance(named: CommandLine.arguments[i + 1] == "dark" ? .darkAqua : .aqua)
@@ -31,12 +32,18 @@ import IOKit.pwr_mgt
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         if Updater.shared.testRun { return Updater.shared.start() }   // --update-test: only the updater, on a copy of the app
-        let keeper = Keeper()
+        let keeper = Keeper(hardware: E2E.hardware ?? RealHardware())
         self.keeper = keeper
-        statusItem = StatusItemController(keeper: keeper)
-        Updater.shared.start()
+        let statusItem = StatusItemController(keeper: keeper)
+        self.statusItem = statusItem
+        if E2E.hardware != nil { E2E.run(delegate: self, keeper: keeper, status: statusItem) } else { Updater.shared.start() }
         pending.forEach(keeper.handle)
         pending = []
+    }
+
+    /// --e2e reaches Quit from the menu and the panel before its last step; the run decides when it really ends.
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        E2E.mayQuit() ? .terminateNow : .terminateCancel
     }
 
     /// sleepless://on?minutes=30 and friends (Info.plist registers the scheme); anything Command.parse refuses is dropped.

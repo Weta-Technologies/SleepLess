@@ -28,7 +28,7 @@ import SwiftUI
     }
 
     private let keeper: Keeper
-    private let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
+    let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
     private let popover = NSPopover()
     private let host: NSHostingController<AnyView>
     private var menu: StatusMenu?
@@ -96,8 +96,10 @@ import SwiftUI
     /// The app was opened again (from Applications, Spotlight, `open -a`): the panel, one way or the other.
     func reopen() {
         guard !popover.isShown, floating == nil else { return }
-        if iconIsHidden { showFloating() } else { open() }
+        if iconHiddenOverride ?? iconIsHidden { showFloating() } else { open() }
     }
+
+    var iconHiddenOverride: Bool?   // --e2e: a full (or roomy) menu bar, whatever this Mac's is
 
     private var iconIsHidden: Bool {
         guard let window = item.button?.window, let screen = window.screen ?? NSScreen.screens.first else { return true }
@@ -107,6 +109,10 @@ import SwiftUI
         }
         return Self.iconHidden(item: window.frame, screen: screen.frame, notch: notch, visible: window.occlusionState.contains(.visible))
     }
+
+    /// Where the panel is right now, for --e2e: the popover's content, the floating panel's, or nil while closed.
+    var panelView: NSView? { floating?.contentView ?? (popover.isShown ? host.view : nil) }
+    var floatingShown: Bool { floating != nil }
 
     /// The same panel in a small floating window at the top right of the menu bar's screen, with a note about the
     /// full menu bar. It takes key presses without activating the app, and Esc or a click anywhere else closes it.
@@ -147,12 +153,21 @@ import SwiftUI
             // Peek (no dequeue) so the button's own tracking still sees the mouse-up.
             NSApp.nextEvent(matching: .leftMouseUp, until: Date(timeIntervalSinceNow: Self.holdDelay), inMode: .eventTracking, dequeue: false) != nil
         }
+        perform(gesture)
+    }
+
+    /// What a click on the icon does once the gesture is known (--e2e calls this in place of a real click).
+    func perform(_ gesture: Gesture) {
+        if popover.isShown { return close() }
         switch gesture {
         case .tap: keeper.toggleAwake()
         case .hold: open()
         case .menu: showMenu()
         }
     }
+
+    /// The quick menu as it would open right now, for --e2e to walk item by item.
+    func quickMenu() -> NSMenu? { menu?.menu() }
 
     /// NSStatusItem pops its menu up on a click when it has one — so it gets one for this click only, and the
     /// menu's delegate takes it away again when it closes (the click gesture must keep working).
@@ -177,7 +192,7 @@ import SwiftUI
         host.view.window?.makeKey()
     }
 
-    private func close() {
+    func close() {
         if let floating {
             floating.orderOut(nil)
             self.floating = nil

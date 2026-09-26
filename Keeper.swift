@@ -99,11 +99,12 @@ struct LidDark: Codable, Equatable {
     @Published private(set) var reasons: [Reason] = []   // automations keeping the Mac awake right now
     @Published private(set) var paused: [Reason] = []    // automations a click turned off, until their reason ends
     @Published private(set) var menuTitle = ""           // time left beside the menu-bar icon (Settings.timeInMenuBar)
-    @Published private(set) var helperReady = LidHelper.isReady
+    @Published private(set) var helperReady = false
     @Published private(set) var helperUpdating = false   // the installed helper is taking this build's signed files (no prompt)
     @Published var setupLater = false                     // "Later" on the setup card, for this launch
     /// The helper is there but from another version: a signed update, or the setup card.
-    var helperStale: Bool { !helperReady && LidHelper.isInstalled }
+    var helperStale: Bool { !helperReady && hw.helperInstalled() }
+    var loginItem: Bool { hw.loginItem() }
     /// Turn the MagSafe charging light off while the lid is shut (own key from before Settings could grow).
     @Published var lightOffWithLid = UserDefaults.standard.object(forKey: "lightOffWithLid") as? Bool ?? true {
         didSet { UserDefaults.standard.set(lightOffWithLid, forKey: "lightOffWithLid"); tick() }
@@ -113,6 +114,7 @@ struct LidDark: Codable, Equatable {
         didSet { UserDefaults.standard.set(lightOff, forKey: "lightIsOff") }
     }
     let icon = MenuIcon()
+    let hw: Hardware   // the Mac (Hardware.swift): real, or the harness's fake
 
     /// On: a mode is on by hand, or an automation holds.
     var isOn: Bool { s.screenOn || s.lidOn || !reasons.isEmpty }
@@ -134,11 +136,13 @@ struct LidDark: Codable, Equatable {
     }
     private static let heartbeat: TimeInterval = 30   // the helper treats > 90 s as a dead app
 
-    init() {
+    init(hardware: Hardware) {
+        hw = hardware
         s = UserDefaults.standard.data(forKey: "settings").flatMap { try? JSONDecoder().decode(Settings.self, from: $0) } ?? Settings()
+        helperReady = hw.helperReady()
         if !UserDefaults.standard.bool(forKey: "loginItemOffered") {   // asked-for default: start at login
             UserDefaults.standard.set(true, forKey: "loginItemOffered")
-            note = LoginItem.set(true)
+            note = hw.setLoginItem(true)
         }
         let timer = Timer(timeInterval: 1, repeats: true) { _ in MainActor.assumeIsolated { self.tick() } }
         RunLoop.main.add(timer, forMode: .common)
@@ -157,9 +161,9 @@ struct LidDark: Codable, Equatable {
         HotKeys.register(s.hotKey)
         if helperStale {   // an app update changed the helper: the installed one takes the signed files itself
             helperUpdating = true
-            HelperUpdate.request(ready: { LidHelper.isReady }) { _ in
+            hw.requestHelperUpdate { _ in
                 self.helperUpdating = false
-                self.helperReady = LidHelper.isReady
+                self.helperReady = self.hw.helperReady()
                 self.tick()
             }
         }
@@ -168,6 +172,7 @@ struct LidDark: Codable, Equatable {
 
     /// --shots: sample state for the panel — no timer, no tick, nothing on the Mac touched.
     init(shots s: Settings, battery: Power.Battery?, helperReady: Bool, lidActive: Bool = false, note: String? = nil, reasons: [Reason] = []) {
+        hw = RealHardware()
         self.s = s
         self.battery = battery
         self.helperReady = helperReady
@@ -182,7 +187,7 @@ struct LidDark: Codable, Equatable {
     /// The one administrator prompt (password or Touch ID): the setup card, a Set up… button, or Reinstall helper.
     func setUpHelper() {
         note = nil
-        switch LidHelper.install() {
+        switch hw.installHelper() {
         case .done: helperReady = true
         case .cancelled: break
         case .failed(let why): note = why
@@ -193,7 +198,7 @@ struct LidDark: Codable, Equatable {
     func setLid(_ on: Bool) {
         note = nil
         guard on else { s.lidOn = false; return }
-        if let why = lidBlocker(Power.battery()) { note = "Can't keep awake with lid closed: \(why)."; return }
+        if let why = lidBlocker(hw.battery()) { note = "Can't keep awake with lid closed: \(why)."; return }
         guard helperReady else { note = "Lid-closed mode needs the one-time setup — click Set up."; return }
         s.lidOn = true
     }
@@ -231,14 +236,14 @@ struct LidDark: Codable, Equatable {
     }
 
     func setLoginItem(_ on: Bool) {
-        note = LoginItem.set(on)
+        note = hw.setLoginItem(on)
         objectWillChange.send()
     }
 
     /// Turning notifications on asks macOS for permission, right then; a refusal leaves the switch off.
     func setNotify(_ on: Bool) {
         guard on else { s.notify = false; return }
-        Notify.enable { [weak self] granted in
+        hw.enableNotifications { [weak self] granted in
             self?.s.notify = granted
             if !granted { self?.note = "Notifications are off for SleepLess in System Settings › Notifications." }
         }
@@ -297,16 +302,16 @@ struct LidDark: Codable, Equatable {
 
     // MARK: Reconcile
 
-    private func tick() {
-        let now = Date()
-        let battery = Power.battery()
+    func tick() {
+        let now = hw.now()
+        let battery = hw.battery()
         if battery != self.battery { self.battery = battery }
-        let active = Power.sleepDisabled
+        let active = hw.sleepDisabled()
         if active != lidActive { lidActive = active }
         let onAC = battery?.onAC ?? true
 
         // Automations: the rules that hold right now, minus the ones a click paused (a pause ends with its reason).
-        let live = Automation.reasons(s, running: apps?.running ?? [], onAC: onAC, externalDisplay: Display.hasExternal, now: now)
+        let live = Automation.reasons(s, running: hw.runningApps(), onAC: onAC, externalDisplay: hw.hasExternalDisplay(), now: now)
         snoozed = snoozed.filter(live.contains)
         let reasons = live.filter { !snoozed.contains($0) }
         if reasons != self.reasons { self.reasons = reasons }
@@ -321,7 +326,7 @@ struct LidDark: Codable, Equatable {
         if n.lidOn, let why = lidBlocker(battery) {
             n.lidOn = false
             note = "Lid-closed mode turned off: \(why)."
-            if s.notify { Notify.post("Lid-closed mode turned off", "SleepLess stopped it: \(why).") }
+            if s.notify { hw.notify("Lid-closed mode turned off", "SleepLess stopped it: \(why).") }
         }
         if n.lidOn, !helperReady, !helperUpdating { n.lidOn = false; note = "Lid-closed mode is off until its helper is set up — click Set up." }
 
@@ -335,7 +340,7 @@ struct LidDark: Codable, Equatable {
             n.offAt = nil
             n.offFrom = nil
             note = "Timer finished, normal sleep is back."
-            if s.notify { Notify.post("SleepLess timer finished", "Your Mac sleeps normally again.") }
+            if s.notify { hw.notify("SleepLess timer finished", "Your Mac sleeps normally again.") }
         } else if n.offAt == nil {
             n.offFrom = now
             n.offAt = n.offAtMinute.map { Clock.next(minute: $0, after: now) } ?? now.addingTimeInterval(TimeInterval(n.offAfter * 60))
@@ -348,13 +353,13 @@ struct LidDark: Codable, Equatable {
         // Lid shut while the Mac is kept up: screen and keyboard light go to 0 but the display stays technically
         // awake — a sleeping display trips the "require password" lock, a dark one doesn't, so opening the lid
         // lands straight back in the session. With a monitor plugged in it's ordinary clamshell use: hands off.
-        let lidClosed = Power.lidClosed
-        let darkLid = lidClosed && lidActive && !Display.hasExternal
+        let lidClosed = hw.lidClosed()
+        let darkLid = lidClosed && lidActive && !hw.hasExternalDisplay()
         // MagSafe light off while the lid is shut in lid-closed mode, macOS's normal colour again when it opens.
         // Only on the change, so it never fights macOS (or another app that drives the light while the lid is open).
         let wantLightOff = lightOffWithLid && lidClosed && lidActive
         if helperReady, wantLightOff != lightOff {
-            LidHelper.light(!wantLightOff)
+            hw.requestLight(!wantLightOff)
             lightOff = wantLightOff
         }
         // Awake by hand or by an automation, with the screen kept on unless "Sleeps" is chosen; a dark lid needs the
@@ -364,14 +369,14 @@ struct LidDark: Codable, Equatable {
         if darkLid { restoreBrightness(); goDark() } else { comeBack(); applyDim(awake) }
         // macOS zeroes the keyboard backlight the moment the lid shuts, before our next tick sees it — so the
         // level to restore is the last one read while the lid was still open.
-        if !lidClosed { keyboardWhileOpen = KeyboardLight.get() }
+        if !lidClosed { keyboardWhileOpen = hw.keyboard() }
         icon.setLidShut(darkLid)
         applyLid(now)
         icon.show(screen: awake, lid: s.lidOn)
     }
 
     private func lidBlocker(_ battery: Power.Battery?) -> String? {
-        if s.pauseWhenHot && Power.isHot { return "the Mac is running hot" }
+        if s.pauseWhenHot && hw.isHot() { return "the Mac is running hot" }
         guard let battery, !battery.onAC else { return nil }
         if s.onlyWhileCharging { return "not on the charger" }
         if s.batteryCutoff > 0 && battery.percent <= s.batteryCutoff { return "battery at \(battery.percent)%" }
@@ -387,36 +392,35 @@ struct LidDark: Codable, Equatable {
     }
 
     private func applyDim(_ awake: Bool) {
-        let idle = CGEventSource.secondsSinceLastEventType(.combinedSessionState, eventType: CGEventType(rawValue: ~0)!)
-        guard awake, s.dims, !s.screenSleeps, idle >= Double(s.delay) else { return restoreBrightness() }
-        guard let original = dimmedFrom ?? Brightness.get() else { return }
+        guard awake, s.dims, !s.screenSleeps, hw.idleSeconds() >= Double(s.delay) else { return restoreBrightness() }
+        guard let original = dimmedFrom ?? hw.brightness() else { return }
         let target = min(original, Float(s.level))   // never brighten a screen that's already below the target
         guard target != dimmedTo else { return }        // re-applies live while the slider moves
         dimmedFrom = original
         dimmedTo = target
-        Brightness.set(target)
+        hw.setBrightness(target)
     }
 
     /// Saves the screen and keyboard-light levels once, then holds both at 0 — re-applied every tick because
     /// ambient-light adjustment would otherwise creep them back up.
     private func goDark() {
-        if lidDark == nil { lidDark = LidDark(screen: Brightness.get(), keyboard: keyboardWhileOpen ?? KeyboardLight.get()) }
-        if (Brightness.get() ?? 0) > 0 { Brightness.set(0) }
-        if let keyboard = KeyboardLight.get(), keyboard.brightness > 0 || keyboard.auto {
-            KeyboardLight.set(.init(brightness: 0, auto: false))
+        if lidDark == nil { lidDark = LidDark(screen: hw.brightness(), keyboard: keyboardWhileOpen ?? hw.keyboard()) }
+        if (hw.brightness() ?? 0) > 0 { hw.setBrightness(0) }
+        if let keyboard = hw.keyboard(), keyboard.brightness > 0 || keyboard.auto {
+            hw.setKeyboard(.init(brightness: 0, auto: false))
         }
     }
 
     private func comeBack() {
         guard let saved = lidDark else { return }
-        if let screen = saved.screen { Brightness.set(screen) }
-        if let keyboard = saved.keyboard { KeyboardLight.set(keyboard) }
+        if let screen = saved.screen { hw.setBrightness(screen) }
+        if let keyboard = saved.keyboard { hw.setKeyboard(keyboard) }
         lidDark = nil
     }
 
     private func restoreBrightness() {
         guard let dimmedFrom else { return }
-        Brightness.set(dimmedFrom)
+        hw.setBrightness(dimmedFrom)
         self.dimmedFrom = nil
         dimmedTo = nil
     }
@@ -425,7 +429,7 @@ struct LidDark: Codable, Equatable {
         guard helperReady else { return }
         let on = s.lidOn
         if let last = lastRequest, last.on == on, !on || now.timeIntervalSince(last.at) < Self.heartbeat { return }
-        LidHelper.request(on)
+        hw.requestLid(on)
         lastRequest = (on, now)
     }
 
@@ -436,7 +440,7 @@ struct LidDark: Codable, Equatable {
     private func shutdown() {
         restoreBrightness()
         comeBack()
-        if helperReady, lightOff { LidHelper.light(true); lightOff = false }
-        if helperReady, s.lidOn { LidHelper.request(false) }   // settings stay on, so it resumes next launch
+        if helperReady, lightOff { hw.requestLight(true); lightOff = false }
+        if helperReady, s.lidOn { hw.requestLid(false) }   // settings stay on, so it resumes next launch
     }
 }

@@ -126,14 +126,14 @@ enum Schedule {
 
 /// The running apps, kept current by NSWorkspace's launch and quit notifications (no permission, no polling).
 @MainActor final class AppWatch {
-    private(set) var running = AppWatch.snapshot()
+    private(set) static var running = snapshot()
     var changed: () -> Void = {}
 
     init() {
         for name in [NSWorkspace.didLaunchApplicationNotification, NSWorkspace.didTerminateApplicationNotification] {
             NSWorkspace.shared.notificationCenter.addObserver(forName: name, object: nil, queue: .main) { _ in
                 MainActor.assumeIsolated {
-                    self.running = Self.snapshot()
+                    Self.running = Self.snapshot()
                     self.changed()
                 }
             }

@@ -183,6 +183,12 @@ runs the helper against a fake `pmset` and a fake light tool (no root needed) an
 
 runs the in-app updater end to end without GitHub: it serves a fake latest-release feed and a signed zip of this build re-versioned as 9.9.9 from a local web server, then runs a *copy* of the app from a temp folder with `--update-test <feed> <key> <log>`, which does exactly what Update Now does — check, download, verify, unpack, sanity-check, swap, relaunch — and proves the copy comes back as 9.9.9 with nothing left behind, that a zip signed with the wrong key and a tampered zip are refused with the copy untouched, and that your real settings never change. Your installed SleepLess is not involved.
 
+```bash
+./test-e2e.sh
+```
+
+runs every user-facing function end to end on a throwaway copy of the build — its own bundle id and settings, no URL-scheme registration, ad-hoc signed — with the Mac behind fakes (`Hardware.swift`): nothing changes the screen or keyboard brightness, the charging light, `pmset`, the helper, the login item or notification permission, and the update feed is answered in process, so nothing is downloaded. It taps, holds and right-clicks the status item through its own handler, walks every quick-menu item, presses every panel control through its accessibility element, opens every `sleepless://` link (and sixteen hostile ones), reopens the app with the icon shown and hidden, fast-forwards a fake clock through a timer and an *at a time* across a DST change, and checks the outcome each time — the settings, the labels, and the copy's own sleep assertions read back from IOKit. It prints one row per function and fails if any row fails or the copy leaves a sleep assertion behind.
+
 ## Security & privacy
 
 - **No analytics, no accounts.** The only network activity is the [update check](#updates) — a plain request to GitHub for the latest release, about once a day, which you can turn off — and the download you start with Update Now. Nothing about you or your Mac is sent.

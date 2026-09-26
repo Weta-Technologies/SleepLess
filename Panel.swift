@@ -53,7 +53,7 @@ struct Panel: View {
             MoreSection(keeper: keeper)
             Divider()
             HStack {
-                Toggle("Launch at login", isOn: Binding(get: { LoginItem.isOn }, set: { keeper.setLoginItem($0) }))
+                Toggle("Launch at login", isOn: Binding(get: { keeper.loginItem }, set: { keeper.setLoginItem($0) }))
                     .toggleStyle(.checkbox)
                     .help("Start SleepLess automatically when you log in.")
                 Spacer()
