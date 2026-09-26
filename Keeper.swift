@@ -314,8 +314,9 @@ struct LidDark: Codable, Equatable {
         if paused != self.paused { self.paused = paused }
 
         var n = s
-        // Auto-enable follows plug/unplug edges only, so a manual flip sticks until the next one.
-        if n.autoWhenCharging, onAC != lastOnAC { n.lidOn = onAC && helperReady }
+        // Auto-enable follows plug/unplug edges only, so a manual flip sticks until the next one. A helper update in
+        // flight counts as ready (launch after an app update); the line below turns it off if the update fails.
+        if n.autoWhenCharging, onAC != lastOnAC { n.lidOn = onAC && (helperReady || helperUpdating) }
         lastOnAC = onAC
         if n.lidOn, let why = lidBlocker(battery) {
             n.lidOn = false
