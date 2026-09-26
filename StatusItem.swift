@@ -115,8 +115,9 @@ import SwiftUI
             .background(Color(nsColor: .windowBackgroundColor))
             .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
             .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(Color.primary.opacity(0.12))))
+        // Default sizing: the content's own constraints size the window as it grows. (.preferredContentSize, right for
+        // the popover, sends a window's layout into a loop that overflows the stack as it orders in.)
         let host = NSHostingController(rootView: card)
-        host.sizingOptions = .preferredContentSize
         let panel = FloatingPanel(contentRect: NSRect(origin: .zero, size: host.view.fittingSize), styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
         panel.contentViewController = host
         panel.isOpaque = false
