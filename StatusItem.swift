@@ -100,6 +100,7 @@ import SwiftUI
     }
 
     var iconHiddenOverride: Bool?   // --e2e: a full (or roomy) menu bar, whatever this Mac's is
+    var animatesOverride: Bool?     // --e2e: no popover animation — its close never finishes for an icon parked off screen
 
     private var iconIsHidden: Bool {
         guard let window = item.button?.window, let screen = window.screen ?? NSScreen.screens.first else { return true }
@@ -183,7 +184,7 @@ import SwiftUI
 
     private func open() {
         guard let button = item.button, !popover.isShown else { return }
-        popover.animates = !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+        popover.animates = animatesOverride ?? !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
         host.rootView = Self.panel(keeper, visible: true)
         host.view.layoutSubtreeIfNeeded()
         popover.contentSize = host.view.fittingSize

@@ -232,6 +232,7 @@ import SwiftUI
         self.delegate = delegate
         self.keeper = keeper
         self.status = status
+        status.animatesOverride = false   // an organiser may park the copy's icon off screen, where a popover's close animation never ends
         let updatingAtLaunch = keeper.helperUpdating, lidWhileUpdating = keeper.s.lidOn
         let timer = Timer(timeInterval: 0.3, repeats: false) { _ in MainActor.assumeIsolated { steps(updatingAtLaunch: updatingAtLaunch, lidWhileUpdating: lidWhileUpdating) } }
         RunLoop.main.add(timer, forMode: .default)
